@@ -73,11 +73,23 @@ function WebsocketFrame:to_string()
   end
 
   -- mask
-  if self.mask then
+  if self.mask and self.mask ~= true then
     header = header .. string.char(bit.rshift(self.mask, 24))
     header = header .. string.char(bit.band(bit.rshift(self.mask, 16), 0xFF))
     header = header .. string.char(bit.band(bit.rshift(self.mask, 8), 0xFF))
     header = header .. string.char(bit.band(self.mask, 0xFF))
+  end
+
+  require("websocket.util.print_bases").print_hex(header .. self.payload)
+
+  if self.mask then
+    local masked_payload = ""
+    for i = 1, self.payload:len() do
+      local j = i % 4
+      masked_payload = string.char(bit.bxor(self.payload:byte(i),
+            bit.rshift(bit.band(bit.lshift(self.mask, j * 8), 0xFF000000), 24))) .. masked_payload
+    end
+    return header .. masked_payload
   end
 
   return header .. self.payload
