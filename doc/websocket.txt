@@ -1,0 +1,4 @@
+*websocket.txt* Library for handling WebSocket connections.
+*websocket.nvim*
+
+Test
