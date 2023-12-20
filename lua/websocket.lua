@@ -3,6 +3,20 @@ local generate_websocket_key = require("websocket.util.websocket_key")
 local uv = vim.loop
 local WebsocketFrame = require("websocket.types.websocket_frame")
 local print_bases = require("websocket.util.print_bases")
+local path_separator = require("websocket.util.path_separator")
+
+local function script_path()
+  local str = debug.getinfo(2, 'S').source:sub(2)
+  str = str:gsub('/', path_separator)
+  return str:match('(.*' .. path_separator .. ')')
+end
+
+WS_LUAROCKS_ADDED = false
+
+if not WS_LUAROCKS_ADDED then
+  package.path = package.path .. ';' .. script_path() .. "rocks/share/lua/5.1/?.lua"
+  package.cpath = package.cpath .. ';' .. script_path() .. "rocks/lib/lua/5.1/?.so"
+end
 
 --- @class Websocket
 --- @field host string
@@ -349,5 +363,5 @@ function Websocket:send_binary(binary)
   })
   self:send_frame(frame)
 end
-  
+
 return { Websocket = Websocket, Opcode = Opcode }

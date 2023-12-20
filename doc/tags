@@ -1,2 +1,7 @@
-websocket.nvim	websocket.txt	/*websocket.nvim*
+Websocket:connect()	websocket.txt	/*Websocket:connect()*
+Websocket:new()	websocket.txt	/*Websocket:new()*
+Websocket:send_binary()	websocket.txt	/*Websocket:send_binary()*
+Websocket:send_frame()	websocket.txt	/*Websocket:send_frame()*
+Websocket:send_text()	websocket.txt	/*Websocket:send_text()*
 websocket.txt	websocket.txt	/*websocket.txt*
+ws-usage	websocket.txt	/*ws-usage*

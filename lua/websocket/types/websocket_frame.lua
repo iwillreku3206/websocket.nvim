@@ -84,7 +84,6 @@ function WebsocketFrame:to_string()
     local masked_payload = ""
     for i = 1, self.payload:len() do
       local j = (i - 1) % 4
-      -- ((mask << (8 * j)) >> 24) & 0xff
       masked_payload = masked_payload .. string.char(bit.bxor(self.payload:byte(i),
             bit.band(bit.rshift(bit.lshift(self.mask, 8 * j), 24), 0xff)))
     end

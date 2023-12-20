@@ -1,4 +1,139 @@
 *websocket.txt* Library for handling WebSocket connections.
-*websocket.nvim*
 
-Test
+Usage                                                                  *ws-usage*
+Everything in `websocket.nvim` uses the `Websocket` class: >lua
+
+    local Websocket = require('websocket').Websocket
+
+    Websocket:new({
+        host = "localhost",
+        port = "80",
+        path = "/"
+    })
+<
+`Websocket:new(opts)`                                              *Websocket:new()*
+<
+Arguments:
+    • {opts}:   Table that contains the options for the websocket. It should
+                contain the following key:
+
+                • host: (string) Hostname
+                • port: (number) Port number
+                • path: (string) Path. Defaults to '/'
+                • origin: (string) Origin header. Optional
+                • protocols: (table) List of protocols that the client
+                  supports. This gets sent via the `Sec-WebSocket-Protocol`
+                  header. Optional
+                • auto_connect: (boolean) True if the WebSocket should
+                  auto-connect. Defaults to `true`
+
+Syntax: >lua
+    local Websocket = require('websocket').Websocket
+
+    local sock = Websocket:new({
+        host = "localhost",
+        port = 80,
+        path = "/",
+        origin = "http://localhost",
+        protocols = {"chat", "superchat"},
+        auto_connect = false
+    })
+<
+
+`Websocket:connect()`                                          *Websocket:connect()*
+
+Connects to the WebSocket server. This is called automatically if
+`auto_connect` is set to `true` in the options passed to `Websocket:new()`
+
+If there are on_connect callbacks attached, they will be called when the
+connection is established. See |ws-on_connect| for more information.
+
+Syntax: >lua
+    local Websocket = require('websocket').Websocket
+
+    local sock = Websocket:new({
+        host = "localhost",
+        port = 80,
+        path = "/",
+        origin = "http://localhost",
+        protocols = {"chat", "superchat"},
+        auto_connect = false
+    })
+
+    sock:connect()
+<
+
+`Websocket:send_frame(data)`                                *Websocket:send_frame()*
+
+Sends a frame to the WebSocket server. This is a low-level function that
+shouldn't be used directly in most cases. Use |Websocket:send_text()| or 
+|Websocket:send_binary()| instead.
+
+Syntax: >lua
+    local Websocket = require('websocket').Websocket
+    local WebsocketFrame = require('websocket_frame')
+    local Opcode = require('websocket.types.opcodes')
+
+
+    local sock = Websocket:new({
+        host = "localhost",
+        port = 80,
+        path = "/",
+        origin = "http://localhost",
+        protocols = {"chat", "superchat"},
+        auto_connect = false
+    })
+
+    sock:connect()
+
+    sock:send_frame(WebsocketFrame:new({
+        opcode = Opcode.TEXT,
+        payload = "Hello, world!"
+    }))
+<
+
+For more information on the frame format, see |websocket_frame.txt|
+
+`Websocket:send_text(data)`                                  *Websocket:send_text()*
+
+Sends a text frame to the WebSocket server.
+
+Syntax: >lua
+    local Websocket = require('websocket').Websocket
+
+    local sock = Websocket:new({
+        host = "localhost",
+        port = 80,
+        path = "/",
+        origin = "http://localhost",
+        protocols = {"chat", "superchat"},
+        auto_connect = false
+    })
+
+    sock:connect()
+
+    sock:send_text("Hello, world!")
+<
+
+`Websocket:send_binary(data)`                              *Websocket:send_binary()*
+
+Sends a binary frame to the WebSocket server.
+
+Syntax: >lua
+    local Websocket = require('websocket').Websocket
+
+    local sock = Websocket:new({
+        host = "localhost",
+        port = 80,
+        path = "/",
+        origin = "http://localhost",
+        protocols = {"chat", "superchat"},
+        auto_connect = false
+    })
+
+    sock:connect()
+
+    sock:send_binary("Hello, world!" .. string.char(0x00) .. string.char(0xFF))
+<
+
+vim:tw=78:ts=8:sw=4:sts=4:et:ft=help:norl:
