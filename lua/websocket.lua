@@ -1,6 +1,8 @@
 local Opcode = require("websocket.types.opcodes")
 local generate_websocket_key = require("websocket.util.websocket_key")
 local uv = vim.loop
+local socket = require("socket")
+local ssl = require("ssl")
 local WebsocketFrame = require("websocket.types.websocket_frame")
 local print_bases = require("websocket.util.print_bases")
 local path_separator = require("websocket.util.path_separator")
@@ -25,6 +27,7 @@ end
 --- @field origin string
 --- @field key string
 --- @field protocols table
+--- @field tls boolean
 --- @field previous string for FIN bit
 --- @field previous_opcode number
 --- @field client uv_tcp_t | nil
@@ -40,6 +43,7 @@ local Websocket = {
   origin = "",
   key = "",
   protocols = {},
+  tls = false,
   -- state
   frame_count = 0,
   previous = "",
@@ -60,6 +64,7 @@ Websocket.__index = Websocket
 --- @field origin string
 --- @field protocols table
 --- @field auto_connect boolean
+--- @field tls boolean
 
 --- @param o WebsocketOptions
 --- @return Websocket
@@ -73,6 +78,7 @@ function Websocket:new(o)
   ws.path = o.path or "/"
   ws.origin = o.origin or ""
   ws.protocols = o.protocols or {}
+  ws.tls = o.tls or false
 
   ws.key = generate_websocket_key()
 
@@ -94,74 +100,74 @@ function Websocket:connect()
   local addr = addrinfo[1].addr
 
   -- create a TCP client and connect to the host
-  local client = uv.new_tcp()
+  local client_sock = socket.tcp()
 
-  if not client then
+  if not client_sock then
     print("Error creating TCP client for websocket")
     return
   end
 
-  client:connect(addr, self.port, function(error)
-    if error then
-      print("Error connecting to websocket: " .. error)
+  local client = client_sock
+  if tls then
+    client = ssl.wrap(client)
+  end
+
+  client:connect(addr, self.port)
+
+  -- construct an HTTP handshake request
+  local request = "GET " .. self.path .. " HTTP/1.1\r\n"
+  request = request .. "Host: " .. self.host .. "\r\n"
+  request = request .. "Upgrade: websocket\r\n"
+  request = request .. "Connection: Upgrade\r\n"
+  request = request .. "Sec-WebSocket-Key: " .. self.key .. "\r\n"
+  request = request .. "Sec-WebSocket-Version: 13\r\n"
+  if self.origin ~= "" then
+    request = request .. "Origin: " .. self.origin .. "\r\n"
+  end
+  if #self.protocols > 0 then
+    request = request .. "Sec-WebSocket-Protocol: " .. table.concat(self.protocols, ", ") .. "\r\n"
+  end
+  request = request .. "\r\n"
+
+  local handshake_request = client:send(request)
+
+  -- send the handshake request
+  if handshake_request == nil then
+    print("Error sending websocket handshake")
+    return
+  end
+
+  client:read_start(function(read_error, data)
+    if read_error then
+      print("Error reading from websocket: " .. read_error)
       return
     end
 
-    -- construct an HTTP handshake request
-    local request = "GET " .. self.path .. " HTTP/1.1\r\n"
-    request = request .. "Host: " .. self.host .. "\r\n"
-    request = request .. "Upgrade: websocket\r\n"
-    request = request .. "Connection: Upgrade\r\n"
-    request = request .. "Sec-WebSocket-Key: " .. self.key .. "\r\n"
-    request = request .. "Sec-WebSocket-Version: 13\r\n"
-    if self.origin ~= "" then
-      request = request .. "Origin: " .. self.origin .. "\r\n"
-    end
-    if #self.protocols > 0 then
-      request = request .. "Sec-WebSocket-Protocol: " .. table.concat(self.protocols, ", ") .. "\r\n"
-    end
-    request = request .. "\r\n"
+    -- TODO: parse and return readers
+    if data and self.frame_count == 0 then
+      local response = data:match("HTTP/1.1 (%d+)")
 
-    -- send the handshake request
-    client:write(request, function(handshake_send_error)
-      if error then
-        print("Error sending websocket handshake: " .. handshake_send_error)
+      if not response or response ~= "101" then
+        print("Error: websocket handshake failed")
         return
-      else
-        client:read_start(function(read_error, data)
-          if read_error then
-            print("Error reading from websocket: " .. read_error)
-            return
-          end
-
-          -- TODO: parse and return readers
-          if data and self.frame_count == 0 then
-            local response = data:match("HTTP/1.1 (%d+)")
-
-            if not response or response ~= "101" then
-              print("Error: websocket handshake failed")
-              return
-            end
-            self.client = client
-            for _, fn in ipairs(self.on_connect) do
-              fn()
-            end
-          end
-
-          if data and self.frame_count > 0 then
-            local frame = self:process_frame(data)
-
-            if frame then
-              for _, fn in ipairs(self.on_message) do
-                fn(frame)
-              end
-            end
-          end
-
-          self.frame_count = self.frame_count + 1
-        end)
       end
-    end)
+      self.client = client
+      for _, fn in ipairs(self.on_connect) do
+        fn()
+      end
+    end
+
+    if data and self.frame_count > 0 then
+      local frame = self:process_frame(data)
+
+      if frame then
+        for _, fn in ipairs(self.on_message) do
+          fn(frame)
+        end
+      end
+    end
+
+    self.frame_count = self.frame_count + 1
   end)
 end
 
