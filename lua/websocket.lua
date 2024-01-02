@@ -249,7 +249,8 @@ function Websocket:process_frame(data)
 
   --- @type boolean | number
   local mask = bit.band(data:byte(index), 0x80) == 0x80
-  local payload_length = bit.band(data:byte(index), 0xEF)
+
+  local payload_length = bit.band(data:byte(index), 0x7F)
 
   index = index + 1 --index 3
   if payload_length == 126 then
