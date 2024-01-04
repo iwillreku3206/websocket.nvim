@@ -1,11 +1,16 @@
-local Opcode = require("websocket.types.opcodes")
-local generate_websocket_key = require("websocket.util.websocket_key")
-local uv = vim.loop
-local socket = require("socket")
-local ssl = require("ssl")
-local WebsocketFrame = require("websocket.types.websocket_frame")
-local print_bases = require("websocket.util.print_bases")
-local path_separator = require("websocket.util.path_separator")
+local Opcode                 = require("websocket.types.opcodes")
+local generate_websocket_key = require("websocket.util.websocket_key").generate_websocket_key
+local verify_websocket_key   = require("websocket.util.websocket_key").verify_websocket_key
+local parse_headers          = require("websocket.util.parse_headers")
+local WebsocketFrame         = require("websocket.types.websocket_frame")
+local print_bases            = require("websocket.util.print_bases")
+local path_separator         = require("websocket.util.path_separator")
+local random_bytes           = require("websocket.util.random_bytes")
+
+local uv                     = vim.loop
+if vim.uv then
+  uv = vim.uv
+end
 
 local function script_path()
   local str = debug.getinfo(2, 'S').source:sub(2)
@@ -20,6 +25,13 @@ if not WS_LUAROCKS_ADDED then
   package.cpath = package.cpath .. ';' .. script_path() .. "rocks/lib/lua/5.1/?.so"
 end
 
+local socket = require("socket")
+local ssl = require("ssl")
+
+--- @alias OnMessageCallback fun(frame: WebsocketFrame)
+--- @alias OnConnectCallback fun(): table<string, string>
+--- @alias OnCloseCallback fun(reason: string | nil)
+
 --- @class Websocket
 --- @field host string
 --- @field port number
@@ -28,11 +40,14 @@ end
 --- @field key string
 --- @field protocols table
 --- @field tls boolean
---- @field previous string for FIN bit
+--- @field previous string For FIN bit
 --- @field previous_opcode number
+--- @field connected boolean Connected with handshake
 --- @field client uv_tcp_t | nil
---- @field frame_count number
---- @field on_message (fun(frame: WebsocketFrame))[]
+--- @field thread luv_thread_t | nil
+--- @field write_pipe uv_pipe_t | nil
+--- @field read_pipe uv_pipe_t | nil
+--- @field on_message OnMessageCallback[]
 --- @field on_connect (fun())[]
 --- @field on_close (fun())[]
 local Websocket = {
@@ -45,10 +60,13 @@ local Websocket = {
   protocols = {},
   tls = false,
   -- state
-  frame_count = 0,
+  connected = false,
   previous = "",
   previous_opcode = Opcode.TEXT,
   client = nil,
+  thread = nil,
+  write_pipe = nil,
+  read_pipe = nil,
   -- callbacks
   on_message = {},
   on_connect = {},
@@ -88,86 +106,72 @@ function Websocket:new(o)
   return ws
 end
 
-function Websocket:connect()
+--- @param callback OnConnectCallback | nil
+--- @return boolean success Returns true if connection is successful
+function Websocket:connect(callback)
   -- get ip address of host
   local addrinfo = uv.getaddrinfo(self.host, nil, nil)
 
   if not addrinfo or #addrinfo < 1 then
     print("Error getting address info for websocket host: " .. self.host)
-    return
+    return false
   end
 
   local addr = addrinfo[1].addr
 
-  -- create a TCP client and connect to the host
-  local client_sock = socket.tcp()
 
-  if not client_sock then
-    print("Error creating TCP client for websocket")
-    return
+  self.connected = true
+  self.client = client
+
+  -- create pipes for inter-thread communication
+  local fds = uv.pipe({ nonblock = true }, { nonblock = true })
+
+  self.write_pipe = uv.new_pipe()
+  self.read_pipe = uv.new_pipe()
+
+  if self.write_pipe == nil or self.read_pipe == nil then
+    print("Unable to create pipes")
+    self:close()
   end
 
-  local client = client_sock
-  if tls then
-    client = ssl.wrap(client)
+  local open_write = self.write_pipe:open(fds.write)
+  local open_read = self.read_pipe:open(fds.read)
+
+  if not open_read or not open_write then
+    print("Unable to open pipes")
+    self:close()
   end
 
-  client:connect(addr, self.port)
+  local pipe_bind, err1, err2 = pipe:bind(pipe_name)
 
-  -- construct an HTTP handshake request
-  local request = "GET " .. self.path .. " HTTP/1.1\r\n"
-  request = request .. "Host: " .. self.host .. "\r\n"
-  request = request .. "Upgrade: websocket\r\n"
-  request = request .. "Connection: Upgrade\r\n"
-  request = request .. "Sec-WebSocket-Key: " .. self.key .. "\r\n"
-  request = request .. "Sec-WebSocket-Version: 13\r\n"
-  if self.origin ~= "" then
-    request = request .. "Origin: " .. self.origin .. "\r\n"
-  end
-  if #self.protocols > 0 then
-    request = request .. "Sec-WebSocket-Protocol: " .. table.concat(self.protocols, ", ") .. "\r\n"
-  end
-  request = request .. "\r\n"
+  ---@param write_pipe uv_pipe_t
+  self.thread = uv.new_thread(function(client, write_pipe)
+    local receive_frame = require("websocket.receive_frame")
 
-  local handshake_request = client:send(request)
-
-  -- send the handshake request
-  if handshake_request == nil then
-    print("Error sending websocket handshake")
-    return
-  end
-
-  client:read_start(function(read_error, data)
-    if read_error then
-      print("Error reading from websocket: " .. read_error)
-      return
-    end
-
-    -- TODO: parse and return readers
-    if data and self.frame_count == 0 then
-      local response = data:match("HTTP/1.1 (%d+)")
-
-      if not response or response ~= "101" then
-        print("Error: websocket handshake failed")
-        return
-      end
-      self.client = client
-      for _, fn in ipairs(self.on_connect) do
-        fn()
-      end
-    end
-
-    if data and self.frame_count > 0 then
-      local frame = self:process_frame(data)
-
+    print(write_pipe:is_writable())
+    while write_pipe:is_writable() do
+      local frame = receive_frame(client)
+      print(frame)
       if frame then
-        for _, fn in ipairs(self.on_message) do
-          fn(frame)
-        end
+        write_pipe:send(frame)
       end
     end
+    client:close()
+  end, client, self.write_pipe)
 
-    self.frame_count = self.frame_count + 1
+  if self.thread == nil then
+    print("Unable to initialize thread")
+    self:close()
+  end
+
+  pipe:read_start(function(err, data)
+    if err then
+      print("Unable to read from pipe")
+      self:close()
+    end
+    for _, fn in ipairs(self.on_message) do
+      fn(data)
+    end
   end)
 end
 
@@ -194,15 +198,13 @@ end
 --- Close the websocket connection
 --- For most purposes, use `Websocket:disconnect()` instead
 function Websocket:close()
-  self.client:close(function(error)
-    if error then
-      print("Error closing websocket: " .. error)
-      return
-    end
-    for _, fn in ipairs(self.on_close) do
-      fn()
-    end
-  end)
+  self.client:close()
+  self.read_pipe:close()
+  self.write_pipe:close()
+  for _, fn in ipairs(self.on_close) do
+    fn()
+  end
+  self.connected = false
 end
 
 local function stub()

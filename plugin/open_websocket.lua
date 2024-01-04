@@ -45,5 +45,40 @@ vim.api.nvim_create_user_command("OpenWebsocket",
   { nargs = "+" })
 
 vim.api.nvim_create_user_command("TestCommand", function()
-  TestWS:send_text("ABCD")
+  local socket = require('socket')
+  local sock = socket.tcp()
+  print "a"
+  sock:settimeout(500)
+  print "acc"
+  local conn, err = sock:connect("127.0.0.1", 9900)
+  print("b" .. vim.json.encode(err))
+
+  self = {
+    path = "/",
+    host = "localhost",
+    key = require("websocket.util.websocket_key")(),
+    origin = "",
+    protocols = {}
+  }
+  local request = "GET " .. self.path .. " HTTP/1.1\r\n"
+  request = request .. "Host: " .. self.host .. "\r\n"
+  request = request .. "Upgrade: websocket\r\n"
+  request = request .. "Connection: Upgrade\r\n"
+  request = request .. "Sec-WebSocket-Key: " .. self.key .. "\r\n"
+  request = request .. "Sec-WebSocket-Version: 13\r\n"
+  if self.origin ~= "" then
+    request = request .. "Origin: " .. self.origin .. "\r\n"
+  end
+  if #self.protocols > 0 then
+    request = request .. "Sec-WebSocket-Protocol: " .. table.concat(self.protocols, ", ") .. "\r\n"
+  end
+  request = request .. "\r\n"
+
+  local handshake_request = sock:send(request)
+  while true do
+    previous, err = sock:receive("*l")
+    if p == "" then
+      break
+    end
+  end
 end, {})

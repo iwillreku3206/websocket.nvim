@@ -15,6 +15,7 @@ WebsocketFrame = {
 --- @field fin boolean
 --- @field opcode Opcode
 --- @field mask boolean | number
+--- @field payload_masked boolean Set to `true` if the data being provided by the payload is already masked
 --- @field payload string
 
 --- @param options WebsocketFrameOptions
@@ -28,6 +29,16 @@ function WebsocketFrame:new(options)
   frame.opcode = options.opcode or Opcode.TEXT
   frame.mask = options.mask or false
   frame.payload = options.payload or ""
+
+  if options.payload_masked and self.mask ~= false then
+    local masked_payload = ""
+    for i = 1, self.payload:len() do
+      local j = (i - 1) % 4
+      masked_payload = masked_payload .. string.char(bit.bxor(self.payload:byte(i),
+            bit.band(bit.rshift(bit.lshift(self.mask, 8 * j), 24), 0xff)))
+    end
+    frame.payload = masked_payload
+  end
 
   return frame
 end
