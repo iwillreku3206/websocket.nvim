@@ -1,7 +1,5 @@
 local Opcode                 = require("websocket.types.opcodes")
 local generate_websocket_key = require("websocket.util.websocket_key").generate_websocket_key
-local verify_websocket_key   = require("websocket.util.websocket_key").verify_websocket_key
-local parse_headers          = require("websocket.util.parse_headers")
 local WebsocketFrame         = require("websocket.types.websocket_frame")
 local print_bases            = require("websocket.util.print_bases")
 local path_separator         = require("websocket.util.path_separator")
@@ -20,17 +18,29 @@ end
 
 WS_LUAROCKS_ADDED = false
 
+local rocks_path = script_path() .. "rocks/share/lua/5.1/?.lua"
+local rocks_cpath = script_path() .. "rocks/lib/lua/5.1/?.so"
+
 if not WS_LUAROCKS_ADDED then
-  package.path = package.path .. ';' .. script_path() .. "rocks/share/lua/5.1/?.lua"
-  package.cpath = package.cpath .. ';' .. script_path() .. "rocks/lib/lua/5.1/?.so"
+  package.path = package.path .. ';' .. rocks_path
+  package.cpath = package.cpath .. ';' .. rocks_cpath
 end
 
-local socket = require("socket")
-local ssl = require("ssl")
 
 --- @alias OnMessageCallback fun(frame: WebsocketFrame)
 --- @alias OnConnectCallback fun(): table<string, string>
 --- @alias OnCloseCallback fun(reason: string | nil)
+
+--- Connection options to be passed to the socket thread
+--- @class ConnectionOptions
+--- @field tls boolean
+--- @field port number
+--- @field path string
+--- @field host string
+--- @field addr string
+--- @field key string
+--- @field origin string
+--- @field protocols string JSON array
 
 --- @class Websocket
 --- @field host string
@@ -106,9 +116,8 @@ function Websocket:new(o)
   return ws
 end
 
---- @param callback OnConnectCallback | nil
---- @return boolean success Returns true if connection is successful
-function Websocket:connect(callback)
+--- @return ConnectionOptions
+function Websocket:get_connection_options()
   -- get ip address of host
   local addrinfo = uv.getaddrinfo(self.host, nil, nil)
 
@@ -119,9 +128,23 @@ function Websocket:connect(callback)
 
   local addr = addrinfo[1].addr
 
+  return {
+    tls = self.tls,
+    port = self.port,
+    path = self.path,
+    host = self.host,
+    addr = addr,
+    key = self.key,
+    origin = self.origin,
+    protocols = vim.json.encode(self.protocols)
+  }
+end
 
-  self.connected = true
-  self.client = client
+--- @param callback OnConnectCallback | nil
+--- @return boolean success Returns true if connection is successful
+function Websocket:connect(callback)
+  -- get connection info
+  local conninfo = vim.json.encode(self:get_connection_options())
 
   -- create pipes for inter-thread communication
   local fds = uv.pipe({ nonblock = true }, { nonblock = true })
@@ -129,7 +152,7 @@ function Websocket:connect(callback)
   self.write_pipe = uv.new_pipe()
   self.read_pipe = uv.new_pipe()
 
-  if self.write_pipe == nil or self.read_pipe == nil then
+  if fds == nil or self.write_pipe == nil or self.read_pipe == nil then
     print("Unable to create pipes")
     self:close()
   end
@@ -142,29 +165,108 @@ function Websocket:connect(callback)
     self:close()
   end
 
-  local pipe_bind, err1, err2 = pipe:bind(pipe_name)
-
+  ---@param read_pipe uv_pipe_t
   ---@param write_pipe uv_pipe_t
-  self.thread = uv.new_thread(function(client, write_pipe)
-    local receive_frame = require("websocket.receive_frame")
+  ---@param rocks_path string
+  ---@param rocks_cpath string
+  self.thread = uv.new_thread(function(read_pipe, write_pipe, rocks_path, rocks_cpath, conninfo)
+    local receive_frame        = require("websocket.receive_frame")
+    local parse_headers        = require("websocket.util.parse_headers")
+    local verify_websocket_key = require("websocket.util.websocket_key").verify_websocket_key
+    local WebsocketFrame       = require("websocket.types.websocket_frame")
+
+    --- @type ConnectionOptions
+    local info                 = vim.json.decode(conninfo, { luanil = { object = true, array = true } })
+
+    package.path               = package.path .. ';' .. rocks_path
+    package.cpath              = package.cpath .. ';' .. rocks_cpath
+
+    local socket               = require("socket")
+    local ssl                  = require("ssl")
+    -- create a TCP client and connect to the host
+    local client_sock          = socket.tcp()
+
+    if not client_sock then
+      print("Error creating TCP client for websocket")
+      return
+    end
+
+    local client = client_sock
+    if info.tls then
+      client = ssl.wrap(client)
+    end
+
+    client:connect(info.addr, info.port)
+
+    -- construct an HTTP handshake request
+    local request = "GET " .. info.path .. " HTTP/1.1\r\n"
+    request = request .. "Host: " .. info.host .. "\r\n"
+    request = request .. "Upgrade: websocket\r\n"
+    request = request .. "Connection: Upgrade\r\n"
+    request = request .. "Sec-WebSocket-Key: " .. info.key .. "\r\n"
+    request = request .. "Sec-WebSocket-Version: 13\r\n"
+    if info.origin ~= "" then
+      request = request .. "Origin: " .. info.origin .. "\r\n"
+    end
+    if #info.protocols > 0 then
+      request = request .. "Sec-WebSocket-Protocol: " .. table.concat(vim.json.decode(info.protocols), ", ") .. "\r\n"
+    end
+    request = request .. "\r\n"
+
+    local handshake_request = client:send(request)
+
+    -- send the handshake request
+    if handshake_request == nil then
+      print("Error sending websocket handshake")
+      return
+    end
+
+    -- read the incoming stream until a double newline (http handshake response)
+    local http_response = ""
+    local previous = ""
+    local err = nil
+
+    while true do
+      previous, err = client:receive("*l")
+
+      if previous == "" then
+        break
+      end
+
+      if err then
+        print("Handshake error: " .. err)
+        return
+      end
+
+      http_response = http_response .. "\n" .. previous
+    end
+
+    local headers = parse_headers(http_response)
+    if not verify_websocket_key(info.key, headers["Sec-WebSocket-Accept"]) then
+      print("Unable to verify WebSocket key")
+      return
+    end
 
     print(write_pipe:is_writable())
     while write_pipe:is_writable() do
       local frame = receive_frame(client)
       print(frame)
       if frame then
-        write_pipe:send(frame)
+        write_pipe:write(frame)
       end
     end
     client:close()
-  end, client, self.write_pipe)
+  end, self.read_pipe, self.write_pipe, rocks_path, rocks_cpath, conninfo)
+
+  self.connected = true
+  -- self.client = client
 
   if self.thread == nil then
     print("Unable to initialize thread")
     self:close()
   end
 
-  pipe:read_start(function(err, data)
+  self.read_pipe:read_start(function(err, data)
     if err then
       print("Unable to read from pipe")
       self:close()
