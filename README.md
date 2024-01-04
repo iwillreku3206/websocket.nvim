@@ -1,6 +1,7 @@
 # websocket.nvim
 
 🚧 UNDER CONSTRUCTION: To see list of features to be implemented, see [To-Do](#to-do) below
+⚠️ UNDER MAJOR REWRITE: (2024-01-04) I am currently rewriting most of this library to support messages longer than the max packet size, SSL/TLS, key checking, header parsing and more. Expect breaking changess soon
 
 A simple-to-use WebSocket client library for Neovim
 
