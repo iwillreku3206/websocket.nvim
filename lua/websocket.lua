@@ -253,7 +253,7 @@ function Websocket:process_frame(data)
   if self.current_frame == nil then
       self.current_frame = {
           data='',
-          opcode=0
+          opcode=0,
           continue=true
       }
   end
