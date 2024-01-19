@@ -136,8 +136,6 @@ function Websocket:connect()
             return
           end
 
-          print('received', #data, 'bytes')
-
           -- TODO: parse and return readers
           if data and self.frame_count == 0 then
             local response = data:match("HTTP/1.1 (%d+)")
@@ -155,13 +153,10 @@ function Websocket:connect()
           if data and self.frame_count > 0 then
             while data do
                 local frame = nil
-                print('processing', #data, 'bytes')
                 frame, data = self:process_frame(data)
 
                 if frame then
-                  print('We have a complete frame! bytes:', #frame.payload, 'opcode:', frame.opcode)
                   for _, fn in ipairs(self.on_message) do
-                    print('Running frame callback...')
                     fn(frame)
                   end
                 end
@@ -261,11 +256,10 @@ function Websocket:process_frame(data)
       }
   end
   if self.current_frame.continue then
-      print('processing header...')
       self.current_frame.fin = bit.band(data:byte(index), 0x80) == 0x80
       local opcode = bit.band(data:byte(index), 0x0F)
 
-      -- continuation frames have opcode, so in those cases
+      -- continuation frames have opcode 0, so in those cases
       -- we just keep the original opcode
       self.current_frame.opcode = bit.bor(self.current_frame.opcode, opcode)
 
@@ -293,8 +287,6 @@ function Websocket:process_frame(data)
         index = index + 8
       end
 
-      print_bases.print_hex(string.sub(data, 1, index+4))
-      print('fin:', self.current_frame.fin, 'opcode:', self.current_frame.opcode, 'payload_length:', payload_length)
       if mask then
         mask = bit.bor(
           bit.lshift(data:byte(index), 24),
@@ -309,25 +301,21 @@ function Websocket:process_frame(data)
       self.current_frame.continue = false
   end
 
-  local data_old = "" .. data
   self.current_frame.data = self.current_frame.data .. data:sub(index)
 
   local data_size = self.current_frame.data:len()
   local payload_length = self.current_frame.payload_length
   if data_size < payload_length then
     -- Need more data to keep processing
-    --print("Error: payload length does not match data length")
-    --print(data:len() .. " ~= " .. payload_length)
-    --print(data_old)
-      return false, nil
+    return false, nil
   end
   local left = nil
   if data_size > payload_length then
-      left = self.current_frame.data:sub(payload_length+1, -1)
-      self.current_frame.data = self.current_frame.data:sub(1, payload_length)
+    -- There's extra data in the buffer, probably for the next frame.
+    left = self.current_frame.data:sub(payload_length+1, -1)
+    self.current_frame.data = self.current_frame.data:sub(1, payload_length)
   end
 
-  print('current frame has', #self.current_frame.data, 'bytes (wants', self.current_frame.payload_length, ')')
   -- done fetching the data, make sure to parse next frame header
   -- in case it's a continuation frame
   self.current_frame.continue = true
@@ -339,15 +327,7 @@ function Websocket:process_frame(data)
       mask = self.current_frame.mask,
       payload = self.current_frame.data,
     })
-    self.previous = ""
     self.current_frame = nil
-
-    --if frame:to_string() ~= data_old then
-      --print("Error: frame does not match data")
-      --print_bases.print_hex(data_old)
-      --print_bases.print_hex(frame:to_string())
-      --return false
-    --end
 
     if frame.opcode == Opcode.CLOSE then
       self:close()
@@ -373,9 +353,6 @@ function Websocket:process_frame(data)
     return frame, left
   end
 
-  if self.current_frame.opcode == Opcode.CONTINUATION or self.current_frame.opcode == Opcode.TEXT then
-    self.previous = self.previous .. data
-  end
   return false, left
 end
 
