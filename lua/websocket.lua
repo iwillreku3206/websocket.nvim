@@ -139,7 +139,7 @@ function Websocket:connect()
             local response = data:match("HTTP/1.1 (%d+)")
 
             if not response or response ~= "101" then
-              print("Error: websocket handshake failed")
+              print("Error: websocket handshake failed:", response)
               return
             end
             self.client = client
@@ -149,11 +149,15 @@ function Websocket:connect()
           end
 
           if data and self.frame_count > 0 then
-            local frame = self:process_frame(data)
+            while data do
+              local frame = nil
+              -- TODO: Can `data` contain partial metadata?
+              frame, data = self:process_frame(data)
 
-            if frame then
-              for _, fn in ipairs(self.on_message) do
-                fn(frame)
+              if frame then
+                for _, fn in ipairs(self.on_message) do
+                  fn(frame)
+                end
               end
             end
           end
@@ -239,71 +243,90 @@ function Websocket:remove_on_close(index)
 end
 
 ---@param data string
----@return false | WebsocketFrame # false if not finished, frame is finished
+---@return false | WebsocketFrame, string|nil # false if not finished, frame is finished
 function Websocket:process_frame(data)
   local index = 1
-  local fin = bit.band(data:byte(index), 0x80) == 0x80
-  local opcode = bit.band(data:byte(index), 0x0F)
-
-  index = index + 1 --index 2
-
-  --- @type boolean | number
-  local mask = bit.band(data:byte(index), 0x80) == 0x80
-  local payload_length = bit.band(data:byte(index), 0xEF)
-
-  index = index + 1 --index 3
-  if payload_length == 126 then
-    payload_length = bit.bor(bit.lshift(data:byte(index), 8), data:byte(index + 1))
-    index = index + 2
-  elseif payload_length == 127 then
-    payload_length = bit.bor(
-      bit.lshift(data:byte(index), 56),
-      bit.lshift(data:byte(index + 1), 48),
-      bit.lshift(data:byte(index + 2), 40),
-      bit.lshift(data:byte(index + 3), 32),
-      bit.lshift(data:byte(index + 4), 24),
-      bit.lshift(data:byte(index + 5), 16),
-      bit.lshift(data:byte(index + 6), 8),
-      data:byte(index + 7)
-    )
-    index = index + 8
+  if self.current_frame == nil then
+    self.current_frame = {
+      data='',
+      opcode=0,
+      payload_length=0,
+      continue=true
+    }
   end
+  if self.current_frame.continue then
+    self.current_frame.fin = bit.band(data:byte(index), 0x80) == 0x80
+    local opcode = bit.band(data:byte(index), 0x0F)
 
-  if mask then
-    mask = bit.bor(
-      bit.lshift(data:byte(index), 24),
-      bit.lshift(data:byte(index + 1), 16),
-      bit.lshift(data:byte(index + 2), 8),
-      data:byte(index + 3)
-    )
-    index = index + 4
-  end
+    -- continuation frames have opcode 0, so in those cases
+    -- we just keep the original opcode
+    self.current_frame.opcode = bit.bor(self.current_frame.opcode, opcode)
 
-  local data_old = "" .. data
-  data = data:sub(index)
+    index = index + 1 --index 2
 
-  if data:len() ~= payload_length then
-    print("Error: payload length does not match data length")
-    print(data:len() .. " ~= " .. payload_length)
-    print(data_old)
-    return false
-  end
+    --- @type boolean | number
+    local mask = bit.band(data:byte(index), 0x80) == 0x80
+    local payload_length = bit.band(data:byte(index), 0x7F)
 
-  if fin then
-    local frame = WebsocketFrame:new({
-      fin = fin,
-      opcode = opcode,
-      mask = mask,
-      payload = self.previous .. data,
-    })
-    self.previous = ""
-
-    if frame:to_string() ~= data_old then
-      print("Error: frame does not match data")
-      print_bases.print_hex(data_old)
-      print_bases.print_hex(frame:to_string())
-      return false
+    index = index + 1 --index 3
+    if payload_length == 126 then
+      payload_length = bit.bor(bit.lshift(data:byte(index), 8), data:byte(index + 1))
+      index = index + 2
+    elseif payload_length == 127 then
+      payload_length = bit.bor(
+        bit.lshift(data:byte(index), 56),
+        bit.lshift(data:byte(index + 1), 48),
+        bit.lshift(data:byte(index + 2), 40),
+        bit.lshift(data:byte(index + 3), 32),
+        bit.lshift(data:byte(index + 4), 24),
+        bit.lshift(data:byte(index + 5), 16),
+        bit.lshift(data:byte(index + 6), 8),
+        data:byte(index + 7)
+      )
+      index = index + 8
     end
+
+    if mask then
+      mask = bit.bor(
+        bit.lshift(data:byte(index), 24),
+        bit.lshift(data:byte(index + 1), 16),
+        bit.lshift(data:byte(index + 2), 8),
+        data:byte(index + 3)
+      )
+      index = index + 4
+    end
+    self.current_frame.mask = mask
+    self.current_frame.payload_length = self.current_frame.payload_length + payload_length
+    self.current_frame.continue = false
+  end
+
+  self.current_frame.data = self.current_frame.data .. data:sub(index)
+
+  local data_size = self.current_frame.data:len()
+  local payload_length = self.current_frame.payload_length
+  if data_size < payload_length then
+    -- Need more data to keep processing
+    return false, nil
+  end
+  local left = nil
+  if data_size > payload_length then
+    -- There's extra data in the buffer, probably for the next frame.
+    left = self.current_frame.data:sub(payload_length+1, -1)
+    self.current_frame.data = self.current_frame.data:sub(1, payload_length)
+  end
+
+  -- done fetching the data, make sure to parse next frame header
+  -- in case it's a continuation frame
+  self.current_frame.continue = true
+
+  if self.current_frame.fin then
+    local frame = WebsocketFrame:new({
+      fin = self.current_frame.fin,
+      opcode = self.current_frame.opcode,
+      mask = self.current_frame.mask,
+      payload = self.current_frame.data,
+    })
+    self.current_frame = nil
 
     if frame.opcode == Opcode.CLOSE then
       self:close()
@@ -326,13 +349,10 @@ function Websocket:process_frame(data)
       return false
     end
 
-    return frame
+    return frame, left
   end
 
-  if opcode == Opcode.CONTINUATION then
-    self.previous = self.previous .. data
-  end
-  return false
+  return false, left
 end
 
 function Websocket:send_frame(frame)
