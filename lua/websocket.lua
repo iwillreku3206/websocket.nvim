@@ -94,6 +94,7 @@ function Websocket:connect()
   local addr = addrinfo[1].addr
 
   -- create a TCP client and connect to the host
+  uv:recv_buffer_size(1048575)
   local client = uv.new_tcp()
 
   if not client then
