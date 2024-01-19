@@ -159,6 +159,7 @@ function Websocket:connect()
                 frame, data = self:process_frame(data)
 
                 if frame then
+                  print('We have a complete frame! bytes:', #frame.payload)
                   for _, fn in ipairs(self.on_message) do
                     fn(frame)
                   end
