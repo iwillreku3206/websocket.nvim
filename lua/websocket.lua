@@ -368,7 +368,7 @@ function Websocket:process_frame(data)
   if self.current_frame.opcode == Opcode.CONTINUATION or self.current_frame.opcode == Opcode.TEXT then
     self.previous = self.previous .. data
   end
-  return false
+  return false, left
 end
 
 function Websocket:send_frame(frame)
