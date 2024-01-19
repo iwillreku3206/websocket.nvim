@@ -137,6 +137,7 @@ function Websocket:connect()
             return
           end
 
+          print('received', #received_data, 'bytes')
           -- The size of the internal buffer for receiving data is limited
           -- If the data is larger than that, then it will be received in
           -- multiple chunks.
