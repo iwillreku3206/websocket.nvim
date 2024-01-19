@@ -130,34 +130,13 @@ function Websocket:connect()
         print("Error sending websocket handshake: " .. handshake_send_error)
         return
       else
-        local prefix = ""
-        client:read_start(function(read_error, received_data)
+        client:read_start(function(read_error, data)
           if read_error then
             print("Error reading from websocket: " .. read_error)
             return
           end
 
-          print('received', #received_data, 'bytes')
-          -- The size of the internal buffer for receiving data is limited.
-          -- If the data is larger than that, then it will be received in
-          -- multiple chunks.
-          -- Here we join them. Not sure this is the best way of doing this,
-          -- just testing for now.
-          if #prefix > 0 then
-              print('ignoring 2 bytes:')
-              print_bases.print_hex(received_data:sub(-3, -1))
-
-              received_data = received_data:sub(1, -3)
-          end
-          local data = prefix .. received_data
-          -- Assuming the size is int16_max+1, because that's true on my system.
-          -- Will look into a way of querying this from libuv.
-          if #received_data == 0x10000 then
-              prefix = data
-              return
-          else
-              prefix = ''
-          end
+          print('received', #data, 'bytes')
 
           -- TODO: parse and return readers
           if data and self.frame_count == 0 then
@@ -174,13 +153,16 @@ function Websocket:connect()
           end
 
           if data and self.frame_count > 0 then
-            print('processing', #data, 'bytes')
-            local frame = self:process_frame(data)
+            while data do
+                local frame = nil
+                print('processing', #data, 'bytes')
+                frame, data = self:process_frame(data)
 
-            if frame then
-              for _, fn in ipairs(self.on_message) do
-                fn(frame)
-              end
+                if frame then
+                  for _, fn in ipairs(self.on_message) do
+                    fn(frame)
+                  end
+                end
             end
           end
 
@@ -268,63 +250,75 @@ end
 ---@return false | WebsocketFrame # false if not finished, frame is finished
 function Websocket:process_frame(data)
   local index = 1
-  local fin = bit.band(data:byte(index), 0x80) == 0x80
-  local opcode = bit.band(data:byte(index), 0x0F)
+  if self.current_frame == nil then
+      self.current_frame = {
+          data=''
+      }
+      self.curent_frame.fin = bit.band(data:byte(index), 0x80) == 0x80
+      self.current_frame.opcode = bit.band(data:byte(index), 0x0F)
 
-  index = index + 1 --index 2
+      index = index + 1 --index 2
 
-  --- @type boolean | number
-  local mask = bit.band(data:byte(index), 0x80) == 0x80
-  local payload_length = bit.band(data:byte(index), 0x7F)
+      --- @type boolean | number
+      local mask = bit.band(data:byte(index), 0x80) == 0x80
+      local payload_length = bit.band(data:byte(index), 0x7F)
 
-  index = index + 1 --index 3
-  if payload_length == 126 then
-    payload_length = bit.bor(bit.lshift(data:byte(index), 8), data:byte(index + 1))
-    index = index + 2
-  elseif payload_length == 127 then
-    payload_length = bit.bor(
-      bit.lshift(data:byte(index), 56),
-      bit.lshift(data:byte(index + 1), 48),
-      bit.lshift(data:byte(index + 2), 40),
-      bit.lshift(data:byte(index + 3), 32),
-      bit.lshift(data:byte(index + 4), 24),
-      bit.lshift(data:byte(index + 5), 16),
-      bit.lshift(data:byte(index + 6), 8),
-      data:byte(index + 7)
-    )
-    index = index + 8
-  end
+      index = index + 1 --index 3
+      if payload_length == 126 then
+        payload_length = bit.bor(bit.lshift(data:byte(index), 8), data:byte(index + 1))
+        index = index + 2
+      elseif payload_length == 127 then
+        payload_length = bit.bor(
+          bit.lshift(data:byte(index), 56),
+          bit.lshift(data:byte(index + 1), 48),
+          bit.lshift(data:byte(index + 2), 40),
+          bit.lshift(data:byte(index + 3), 32),
+          bit.lshift(data:byte(index + 4), 24),
+          bit.lshift(data:byte(index + 5), 16),
+          bit.lshift(data:byte(index + 6), 8),
+          data:byte(index + 7)
+        )
+        index = index + 8
+      end
 
-  if mask then
-    mask = bit.bor(
-      bit.lshift(data:byte(index), 24),
-      bit.lshift(data:byte(index + 1), 16),
-      bit.lshift(data:byte(index + 2), 8),
-      data:byte(index + 3)
-    )
-    index = index + 4
+      if mask then
+        mask = bit.bor(
+          bit.lshift(data:byte(index), 24),
+          bit.lshift(data:byte(index + 1), 16),
+          bit.lshift(data:byte(index + 2), 8),
+          data:byte(index + 3)
+        )
+        index = index + 4
+      end
+      print('fin:', fin, 'opcode:', opcode, 'payload_length:', payload_length)
+      print_bases.print_hex(string.sub(data, 1, index-1))
   end
 
   local data_old = "" .. data
-  data = data:sub(index)
+  self.current_frame.data = self.current_frame.data .. data:sub(index)
 
-  print('fin:', fin, 'opcode:', opcode, 'payload_length:', payload_length)
-  print_bases.print_hex(string.sub(data_old, 1, 10))
-  if data:len() ~= payload_length then
-    print("Error: payload length does not match data length")
-    print(data:len() .. " ~= " .. payload_length)
+  local data_size = self.current_frame.data:len()
+  if data_size < payload_length then
+    --print("Error: payload length does not match data length")
+    --print(data:len() .. " ~= " .. payload_length)
     --print(data_old)
-    return false
+      return false, nil
+  end
+  local left = nil
+  if data_size > payload_length then
+      left = self.current_frame.data:sub(payload_length, -1)
+      self.current_frame.data = self.current_frame.data:sub(1, payload_length)
   end
 
   if fin then
     local frame = WebsocketFrame:new({
-      fin = fin,
-      opcode = opcode,
-      mask = mask,
-      payload = self.previous .. data,
+      fin = self.current_frame.fin,
+      opcode = self.current_frame.opcode,
+      mask = self.current_frame.mask,
+      payload = self.current_frame.data,
     })
     self.previous = ""
+    self.current_frame = nil
 
     if frame:to_string() ~= data_old then
       print("Error: frame does not match data")
@@ -354,10 +348,10 @@ function Websocket:process_frame(data)
       return false
     end
 
-    return frame
+    return frame, left
   end
 
-  if opcode == Opcode.CONTINUATION then
+  if opcode == Opcode.CONTINUATION || opcode == Opcode.TEXT then
     self.previous = self.previous .. data
   end
   return false
