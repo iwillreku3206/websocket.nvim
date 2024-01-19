@@ -145,9 +145,9 @@ function Websocket:connect()
           -- just testing for now.
           if #prefix > 0 then
               print('ignoring 2 bytes:')
-              print_bases.print_hex(received_data:sub(1, 2))
+              print_bases.print_hex(received_data:sub(-3, -1))
 
-              received_data = received_data:sub(3)
+              received_data = received_data:sub(1, -3)
           end
           local data = prefix .. received_data
           -- Assuming the size is int16_max+1, because that's true on my system.
