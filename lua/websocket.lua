@@ -144,6 +144,9 @@ function Websocket:connect()
           -- Here we join them. Not sure this is the best way of doing this,
           -- just testing for now.
           if #prefix > 0 then
+              print('ignoring 2 bytes:')
+              print_bases.print_hex(received_data:sub(1, 2))
+
               received_data = received_data:sub(3)
           end
           local data = prefix .. received_data
