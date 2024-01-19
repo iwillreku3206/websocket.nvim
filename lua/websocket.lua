@@ -143,7 +143,7 @@ function Websocket:connect()
             local response = data:match("HTTP/1.1 (%d+)")
 
             if not response or response ~= "101" then
-              print("Error: websocket handshake failed")
+              print("Error: websocket handshake failed:", response)
               return
             end
             self.client = client
