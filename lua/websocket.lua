@@ -143,6 +143,9 @@ function Websocket:connect()
           -- multiple chunks.
           -- Here we join them. Not sure this is the best way of doing this,
           -- just testing for now.
+          if #prefix > 0 then
+              received_data = string.sub(received_data, 3, -1)
+          end
           local data = prefix .. received_data
           -- Assuming the size is int16_max+1, because that's true on my system.
           -- Will look into a way of querying this from libuv.
