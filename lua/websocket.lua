@@ -249,7 +249,7 @@ function Websocket:process_frame(data)
 
   --- @type boolean | number
   local mask = bit.band(data:byte(index), 0x80) == 0x80
-  local payload_length = bit.band(data:byte(index), 0x7E)
+  local payload_length = bit.band(data:byte(index), 0x7F)
 
   index = index + 1 --index 3
   if payload_length == 126 then
@@ -285,7 +285,8 @@ function Websocket:process_frame(data)
   if data:len() ~= payload_length then
     print("Error: payload length does not match data length")
     print(data:len() .. " ~= " .. payload_length)
-    print(data_old)
+    print_bases.print_hex(data.sub(0
+    --print(data_old)
     return false
   end
 
