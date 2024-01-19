@@ -287,6 +287,8 @@ function Websocket:process_frame(data)
         index = index + 8
       end
 
+      print_bases.print_hex(string.sub(data, 1, index+4))
+      print('fin:', self.current_frame.fin, 'opcode:', self.current_frame.opcode, 'payload_length:', payload_length)
       if mask then
         mask = bit.bor(
           bit.lshift(data:byte(index), 24),
@@ -296,8 +298,6 @@ function Websocket:process_frame(data)
         )
         index = index + 4
       end
-      print('fin:', self.current_frame.fin, 'opcode:', self.current_frame.opcode, 'payload_length:', payload_length)
-      print_bases.print_hex(string.sub(data, 1, index-1))
       self.current_frame.mask = mask
       self.current_frame.payload_length = payload_length
   end
