@@ -138,13 +138,13 @@ function Websocket:connect()
           end
 
           print('received', #received_data, 'bytes')
-          -- The size of the internal buffer for receiving data is limited
+          -- The size of the internal buffer for receiving data is limited.
           -- If the data is larger than that, then it will be received in
           -- multiple chunks.
           -- Here we join them. Not sure this is the best way of doing this,
           -- just testing for now.
           if #prefix > 0 then
-              received_data = string.sub(received_data, 3, -1)
+              received_data = received_data:sub(3)
           end
           local data = prefix .. received_data
           -- Assuming the size is int16_max+1, because that's true on my system.
@@ -155,7 +155,6 @@ function Websocket:connect()
           else
               prefix = ''
           end
-          print('processing', #data, 'bytes')
 
           -- TODO: parse and return readers
           if data and self.frame_count == 0 then
@@ -172,6 +171,7 @@ function Websocket:connect()
           end
 
           if data and self.frame_count > 0 then
+            print('processing', #data, 'bytes')
             local frame = self:process_frame(data)
 
             if frame then
