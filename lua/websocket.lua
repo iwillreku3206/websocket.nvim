@@ -340,12 +340,12 @@ function Websocket:process_frame(data)
     self.previous = ""
     self.current_frame = nil
 
-    if frame:to_string() ~= data_old then
-      print("Error: frame does not match data")
-      print_bases.print_hex(data_old)
-      print_bases.print_hex(frame:to_string())
-      return false
-    end
+    --if frame:to_string() ~= data_old then
+      --print("Error: frame does not match data")
+      --print_bases.print_hex(data_old)
+      --print_bases.print_hex(frame:to_string())
+      --return false
+    --end
 
     if frame.opcode == Opcode.CLOSE then
       self:close()
