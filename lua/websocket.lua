@@ -130,10 +130,26 @@ function Websocket:connect()
         print("Error sending websocket handshake: " .. handshake_send_error)
         return
       else
-        client:read_start(function(read_error, data)
+        local prefix = ""
+        client:read_start(function(read_error, received_data)
           if read_error then
             print("Error reading from websocket: " .. read_error)
             return
+          end
+
+          -- The size of the internal buffer for receiving data is limited
+          -- If the data is larger than that, then it will be received in
+          -- multiple chunks.
+          -- Here we join them. Not sure this is the best way of doing this,
+          -- just testing for now.
+          local data = prefix .. received_data
+          -- Assuming the size is int16_max, because that's true on my system.
+          -- Will look into a way of querying this from libuv.
+          if #received_data == 0xFFFF then
+              prefix = data
+              return
+          else
+              prefix = ''
           end
 
           -- TODO: parse and return readers
