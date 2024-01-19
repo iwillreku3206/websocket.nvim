@@ -150,7 +150,7 @@ function Websocket:connect()
           -- Assuming the size is int16_max+1, because that's true on my system.
           -- Will look into a way of querying this from libuv.
           if #received_data == 0x10000 then
-              prefix = string.sub(data, 3, -1)
+              prefix = data
               return
           else
               prefix = ''
