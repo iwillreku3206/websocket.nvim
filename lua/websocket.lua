@@ -144,14 +144,15 @@ function Websocket:connect()
           -- Here we join them. Not sure this is the best way of doing this,
           -- just testing for now.
           local data = prefix .. received_data
-          -- Assuming the size is int16_max, because that's true on my system.
+          -- Assuming the size is int16_max+1, because that's true on my system.
           -- Will look into a way of querying this from libuv.
-          if #received_data == 0xFFFF then
+          if #received_data == 0x10000 then
               prefix = data
               return
           else
               prefix = ''
           end
+          print('processing', #data, 'bytes')
 
           -- TODO: parse and return readers
           if data and self.frame_count == 0 then
