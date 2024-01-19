@@ -152,14 +152,15 @@ function Websocket:connect()
 
           if data and self.frame_count > 0 then
             while data do
-                local frame = nil
-                frame, data = self:process_frame(data)
+              local frame = nil
+              -- TODO: Can `data` contain partial metadata?
+              frame, data = self:process_frame(data)
 
-                if frame then
-                  for _, fn in ipairs(self.on_message) do
-                    fn(frame)
-                  end
+              if frame then
+                for _, fn in ipairs(self.on_message) do
+                  fn(frame)
                 end
+              end
             end
           end
 
@@ -248,57 +249,57 @@ end
 function Websocket:process_frame(data)
   local index = 1
   if self.current_frame == nil then
-      self.current_frame = {
-          data='',
-          opcode=0,
-          payload_length=0,
-          continue=true
-      }
+    self.current_frame = {
+      data='',
+      opcode=0,
+      payload_length=0,
+      continue=true
+    }
   end
   if self.current_frame.continue then
-      self.current_frame.fin = bit.band(data:byte(index), 0x80) == 0x80
-      local opcode = bit.band(data:byte(index), 0x0F)
+    self.current_frame.fin = bit.band(data:byte(index), 0x80) == 0x80
+    local opcode = bit.band(data:byte(index), 0x0F)
 
-      -- continuation frames have opcode 0, so in those cases
-      -- we just keep the original opcode
-      self.current_frame.opcode = bit.bor(self.current_frame.opcode, opcode)
+    -- continuation frames have opcode 0, so in those cases
+    -- we just keep the original opcode
+    self.current_frame.opcode = bit.bor(self.current_frame.opcode, opcode)
 
-      index = index + 1 --index 2
+    index = index + 1 --index 2
 
-      --- @type boolean | number
-      local mask = bit.band(data:byte(index), 0x80) == 0x80
-      local payload_length = bit.band(data:byte(index), 0x7F)
+    --- @type boolean | number
+    local mask = bit.band(data:byte(index), 0x80) == 0x80
+    local payload_length = bit.band(data:byte(index), 0x7F)
 
-      index = index + 1 --index 3
-      if payload_length == 126 then
-        payload_length = bit.bor(bit.lshift(data:byte(index), 8), data:byte(index + 1))
-        index = index + 2
-      elseif payload_length == 127 then
-        payload_length = bit.bor(
-          bit.lshift(data:byte(index), 56),
-          bit.lshift(data:byte(index + 1), 48),
-          bit.lshift(data:byte(index + 2), 40),
-          bit.lshift(data:byte(index + 3), 32),
-          bit.lshift(data:byte(index + 4), 24),
-          bit.lshift(data:byte(index + 5), 16),
-          bit.lshift(data:byte(index + 6), 8),
-          data:byte(index + 7)
-        )
-        index = index + 8
-      end
+    index = index + 1 --index 3
+    if payload_length == 126 then
+      payload_length = bit.bor(bit.lshift(data:byte(index), 8), data:byte(index + 1))
+      index = index + 2
+    elseif payload_length == 127 then
+      payload_length = bit.bor(
+        bit.lshift(data:byte(index), 56),
+        bit.lshift(data:byte(index + 1), 48),
+        bit.lshift(data:byte(index + 2), 40),
+        bit.lshift(data:byte(index + 3), 32),
+        bit.lshift(data:byte(index + 4), 24),
+        bit.lshift(data:byte(index + 5), 16),
+        bit.lshift(data:byte(index + 6), 8),
+        data:byte(index + 7)
+      )
+      index = index + 8
+    end
 
-      if mask then
-        mask = bit.bor(
-          bit.lshift(data:byte(index), 24),
-          bit.lshift(data:byte(index + 1), 16),
-          bit.lshift(data:byte(index + 2), 8),
-          data:byte(index + 3)
-        )
-        index = index + 4
-      end
-      self.current_frame.mask = mask
-      self.current_frame.payload_length = self.current_frame.payload_length + payload_length
-      self.current_frame.continue = false
+    if mask then
+      mask = bit.bor(
+        bit.lshift(data:byte(index), 24),
+        bit.lshift(data:byte(index + 1), 16),
+        bit.lshift(data:byte(index + 2), 8),
+        data:byte(index + 3)
+      )
+      index = index + 4
+    end
+    self.current_frame.mask = mask
+    self.current_frame.payload_length = self.current_frame.payload_length + payload_length
+    self.current_frame.continue = false
   end
 
   self.current_frame.data = self.current_frame.data .. data:sub(index)
