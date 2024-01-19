@@ -101,8 +101,6 @@ function Websocket:connect()
     return
   end
 
-  uv.recv_buffer_size(client, 1048575)
-
   client:connect(addr, self.port, function(error)
     if error then
       print("Error connecting to websocket: " .. error)
