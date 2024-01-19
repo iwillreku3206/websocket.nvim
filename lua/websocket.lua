@@ -250,14 +250,17 @@ end
 ---@return false | WebsocketFrame, string|nil # false if not finished, frame is finished
 function Websocket:process_frame(data)
   local index = 1
-  if self.current_frame == nil or self.current_frame.continue then
-      print('processing header...')
+  if self.current_frame == nil then
       self.current_frame = {
           data='',
           opcode=0
+          continue=true
       }
+  end
+  if self.current_frame.continue then
+      print('processing header...')
       self.current_frame.fin = bit.band(data:byte(index), 0x80) == 0x80
-      opcode = bit.band(data:byte(index), 0x0F)
+      local opcode = bit.band(data:byte(index), 0x0F)
 
       -- continuation frames have opcode, so in those cases
       -- we just keep the original opcode
@@ -300,11 +303,11 @@ function Websocket:process_frame(data)
       end
       self.current_frame.mask = mask
       self.current_frame.payload_length = payload_length
+      self.current_frame.continue = false
   end
 
   local data_old = "" .. data
   self.current_frame.data = self.current_frame.data .. data:sub(index)
-  print('current frame has', #self.current_frame.data, 'bytes')
 
   local data_size = self.current_frame.data:len()
   local payload_length = self.current_frame.payload_length
@@ -320,6 +323,8 @@ function Websocket:process_frame(data)
       left = self.current_frame.data:sub(payload_length+1, -1)
       self.current_frame.data = self.current_frame.data:sub(1, payload_length)
   end
+
+  print('current frame has', #self.current_frame.data, 'bytes (wants', self.current_frame.payload_length, ')')
   -- done fetching the data, make sure to parse next frame header
   -- in case it's a continuation frame
   self.current_frame.continue = true
