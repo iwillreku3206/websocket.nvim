@@ -317,7 +317,7 @@ function Websocket:process_frame(data)
   end
   local left = nil
   if data_size > payload_length then
-      left = self.current_frame.data:sub(payload_length, -1)
+      left = self.current_frame.data:sub(payload_length+1, -1)
       self.current_frame.data = self.current_frame.data:sub(1, payload_length)
   end
   -- done fetching the data, make sure to parse next frame header
