@@ -285,7 +285,7 @@ function Websocket:process_frame(data)
   if data:len() ~= payload_length then
     print("Error: payload length does not match data length")
     print(data:len() .. " ~= " .. payload_length)
-    print(print_bases.print_hex(data.sub(1, 10)))
+    print(print_bases.print_hex(string.sub(data, 1, 10)))
     --print(data_old)
     return false
   end
