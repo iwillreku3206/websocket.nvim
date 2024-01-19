@@ -95,12 +95,13 @@ function Websocket:connect()
 
   -- create a TCP client and connect to the host
   local client = uv.new_tcp()
-  client:recv_buffer_size(1048575)
 
   if not client then
     print("Error creating TCP client for websocket")
     return
   end
+
+  uv.recv_buffer_size(client, 1048575)
 
   client:connect(addr, self.port, function(error)
     if error then
