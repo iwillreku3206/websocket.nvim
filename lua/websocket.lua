@@ -308,13 +308,14 @@ function Websocket:process_frame(data)
   local data_old = "" .. data
   data = data:sub(index)
 
+  print('fin:', fin, 'opcode:', opcode, 'payload_length:', payload_length)
+  print_bases.print_hex(string.sub(data_old, 1, 10))
   if data:len() ~= payload_length then
     print("Error: payload length does not match data length")
     print(data:len() .. " ~= " .. payload_length)
     --print(data_old)
     return false
   end
-  print_bases.print_hex(string.sub(data_old, 1, 10))
 
   if fin then
     local frame = WebsocketFrame:new({
