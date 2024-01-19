@@ -254,6 +254,7 @@ function Websocket:process_frame(data)
       self.current_frame = {
           data='',
           opcode=0,
+          payload_length=0,
           continue=true
       }
   end
@@ -302,7 +303,7 @@ function Websocket:process_frame(data)
         index = index + 4
       end
       self.current_frame.mask = mask
-      self.current_frame.payload_length = payload_length
+      self.current_frame.payload_length = self.current_frame.payload_length + payload_length
       self.current_frame.continue = false
   end
 
