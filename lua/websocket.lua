@@ -247,14 +247,14 @@ function Websocket:remove_on_close(index)
 end
 
 ---@param data string
----@return false | WebsocketFrame # false if not finished, frame is finished
+---@return false | WebsocketFrame, string|nil # false if not finished, frame is finished
 function Websocket:process_frame(data)
   local index = 1
   if self.current_frame == nil then
       self.current_frame = {
           data=''
       }
-      self.curent_frame.fin = bit.band(data:byte(index), 0x80) == 0x80
+      self.current_frame.fin = bit.band(data:byte(index), 0x80) == 0x80
       self.current_frame.opcode = bit.band(data:byte(index), 0x0F)
 
       index = index + 1 --index 2
@@ -290,14 +290,17 @@ function Websocket:process_frame(data)
         )
         index = index + 4
       end
-      print('fin:', fin, 'opcode:', opcode, 'payload_length:', payload_length)
+      print('fin:', self.current_frame.fin, 'opcode:', self.current_frame.opcode, 'payload_length:', payload_length)
       print_bases.print_hex(string.sub(data, 1, index-1))
+      self.current_frame.mask = mask
+      self.current_frame.payload_length = payload_length
   end
 
   local data_old = "" .. data
   self.current_frame.data = self.current_frame.data .. data:sub(index)
 
   local data_size = self.current_frame.data:len()
+  local payload_length = self.current_frame.payload_length
   if data_size < payload_length then
     --print("Error: payload length does not match data length")
     --print(data:len() .. " ~= " .. payload_length)
@@ -310,7 +313,7 @@ function Websocket:process_frame(data)
       self.current_frame.data = self.current_frame.data:sub(1, payload_length)
   end
 
-  if fin then
+  if self.current_frame.fin then
     local frame = WebsocketFrame:new({
       fin = self.current_frame.fin,
       opcode = self.current_frame.opcode,
@@ -351,7 +354,7 @@ function Websocket:process_frame(data)
     return frame, left
   end
 
-  if opcode == Opcode.CONTINUATION || opcode == Opcode.TEXT then
+  if self.current_frame.opcode == Opcode.CONTINUATION or self.current_frame.opcode == Opcode.TEXT then
     self.previous = self.previous .. data
   end
   return false
